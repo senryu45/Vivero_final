@@ -4,9 +4,8 @@ from decimal import Decimal, InvalidOperation
 from tkinter import ttk, messagebox
 
 import db
-from login import patron_correo
 from validaciones import (ETIQUETAS_PAISES, PAIS_POR_DEFECTO, region_de_etiqueta,
-                          separar_telefono, validar_telefono)
+                          separar_telefono, validar_correo, validar_telefono)
 
 VERDE_OSCURO = "#3F5A1A"
 FONDO_SECCION = "#C5C7B5"
@@ -29,6 +28,7 @@ class AltaPersonal(tk.Frame):
         super().__init__(master, bg=FONDO_SECCION)
         self.datos = datos
         self.editando = None          # id_usuario que se está editando (None = alta nueva)
+        self._correo_original = None  # correo del empleado al empezar a editarlo
 
         # ---------------- Formulario (izquierda) ----------------
         izq = tk.Frame(self, bg=FONDO_SECCION)
@@ -162,6 +162,7 @@ class AltaPersonal(tk.Frame):
             self.btn_cancelar.pack(side="left", padx=(8, 0))
         else:
             self.editando = None
+            self._correo_original = None
             self.titulo.config(text="Alta de personal")
             self.btn_guardar.config(text="Registrar personal")
             self.nota.config(text=NOTA_ALTA)
@@ -245,6 +246,7 @@ class AltaPersonal(tk.Frame):
         self._poner(self.e_cargo, f["cargo"])
         self._poner(self.e_salario, "" if f["salario"] is None else str(f["salario"]))
         self.editando = id_usuario
+        self._correo_original = (f["correo"] or "").strip().lower()
         self._modo_edicion(True)
         self.e_nombre.focus_set()
 
@@ -294,8 +296,11 @@ class AltaPersonal(tk.Frame):
             return None, "Completa nombre, correo y contraseña."
         if not patron_nombre.match(nombre):
             return None, "El nombre solo puede tener letras y espacios (mínimo 3)."
-        if not patron_correo.match(correo):
-            return None, "Escribe un correo válido."
+        # Si solo se edita otro dato y el correo no cambió, no se repite la consulta DNS
+        sin_cambio = en_edicion and correo == self._correo_original
+        correo, error_correo = validar_correo(correo, verificar_dominio=not sin_cambio)
+        if error_correo:
+            return None, error_correo
         telefono, error_tel = validar_telefono(telefono, region_de_etiqueta(self.pais.get()))
         if error_tel:
             return None, error_tel

@@ -5,9 +5,9 @@ from tkinter import messagebox, ttk
 import db
 from comun import (ANCHO, ALTO, ANCHO_IZQ, FONDO_DERECHO, CAFE, TEXTO, FUENTE,
                    crear_panel_izquierdo)
-from login import CampoRedondeado, BotonRedondeado, patron_correo, ANCHO_CAMPO
+from login import CampoRedondeado, BotonRedondeado, ANCHO_CAMPO
 from validaciones import (ETIQUETAS_PAISES, PAIS_POR_DEFECTO, region_de_etiqueta,
-                          validar_telefono)
+                          validar_correo, validar_telefono)
 
 patron_nombre = re.compile(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' .-]{3,150}$")
 ANCHO_PAIS = 150      # ancho del menú de país; el campo de teléfono ocupa el resto
@@ -96,8 +96,9 @@ class pantalla_registro(tk.Frame):
             return None, "Completa nombre, correo y contraseña."
         if not patron_nombre.match(nombre):
             return None, "El nombre solo puede tener letras y espacios (mínimo 3)."
-        if not patron_correo.match(correo):
-            return None, "Escribe un correo válido."
+        correo, error_correo = validar_correo(correo)
+        if error_correo:
+            return None, error_correo
         telefono, error_tel = validar_telefono(telefono, region_de_etiqueta(self.pais.get()))
         if error_tel:
             return None, error_tel

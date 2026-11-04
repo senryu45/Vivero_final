@@ -2,9 +2,17 @@
 
 Requiere:  pip install phonenumbers
 """
+import os
 import re
+import socket
 
 import phonenumbers
+
+try:        # pip install email-validator  (revisa que el dominio exista y reciba correos)
+    from email_validator import EmailNotValidError, EmailUndeliverableError, validate_email
+except ImportError:         # sin la librería solo se revisa el formato y las listas
+    validate_email = None
+    EmailNotValidError = EmailUndeliverableError = Exception
 
 # (nombre que ve el usuario, código ISO del país). Agrega o quita los que necesites.
 PAISES = [
@@ -109,3 +117,97 @@ def validar_contrasena(clave, confirmar=None):
     if confirmar is not None and clave != confirmar:
         return "Las contraseñas no coinciden."
     return None
+
+
+# =====================================================================================
+# Correo electrónico (empleados y clientes)
+# =====================================================================================
+# Poner VERIFICAR_DOMINIO_CORREO=0 para saltarse la consulta DNS (por ejemplo, sin internet).
+VERIFICAR_DOMINIO = os.getenv("VERIFICAR_DOMINIO_CORREO", "1") != "0"
+
+_ETIQUETA = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_PATRON_CORREO = re.compile(
+    rf"^[a-z0-9]+(?:[._+-][a-z0-9]+)*@(?:{_ETIQUETA}\.)+(?:[a-z]{{2,24}}|xn--[a-z0-9-]{{2,59}})$")
+
+# Dominios de correo temporal / desechable
+DOMINIOS_DESECHABLES = {
+    "mailinator.com", "guerrillamail.com", "guerrillamail.net", "sharklasers.com",
+    "10minutemail.com", "tempmail.com", "temp-mail.org", "yopmail.com", "trashmail.com",
+    "getnada.com", "dispostable.com", "maildrop.cc", "throwawaymail.com", "fakeinbox.com",
+    "mintemail.com", "mailnesia.com", "tempail.com", "emailondeck.com", "mohmal.com",
+}
+# Dominios de ejemplo o inexistentes
+DOMINIOS_RESERVADOS = {
+    "example.com", "example.org", "example.net", "test.com", "prueba.com", "ejemplo.com",
+    "correo.com", "email.com", "mail.com.mx", "dominio.com", "midominio.com", "localhost",
+}
+SUFIJOS_RESERVADOS = (".test", ".invalid", ".local", ".localhost", ".example", ".lan", ".internal")
+
+# Errores de escritura muy comunes -> dominio correcto
+ERRORES_DOMINIO = {
+    "gmial.com": "gmail.com", "gmai.com": "gmail.com", "gamil.com": "gmail.com",
+    "gmail.con": "gmail.com", "gmail.cm": "gmail.com", "gnail.com": "gmail.com",
+    "gmail.comm": "gmail.com", "gmali.com": "gmail.com", "gmaill.com": "gmail.com",
+    "hotmial.com": "hotmail.com", "hotmai.com": "hotmail.com", "hotnail.com": "hotmail.com",
+    "hotmail.con": "hotmail.com", "hotmal.com": "hotmail.com",
+    "outlok.com": "outlook.com", "outlook.con": "outlook.com", "outloo.com": "outlook.com",
+    "yahooo.com": "yahoo.com", "yaho.com": "yahoo.com", "yahoo.con": "yahoo.com",
+    "icloud.con": "icloud.com", "iclod.com": "icloud.com", "live.con": "live.com",
+}
+
+# Parte antes de la @ que claramente no es de una persona real
+USUARIOS_FALSOS = {
+    "test", "tests", "prueba", "pruebas", "asdf", "asdfg", "asdfgh", "qwerty", "abc", "abcd",
+    "abc123", "correo", "email", "ejemplo", "example", "nombre", "usuario", "user", "fake",
+    "falso", "nadie", "xxx", "xyz", "none", "null", "noreply", "no-reply",
+}
+
+
+def _hay_internet():
+    """True si se puede resolver un dominio conocido (para no culpar al correo si falla la red)."""
+    try:
+        socket.getaddrinfo("gmail.com", 443)
+        return True
+    except OSError:
+        return False
+
+
+def validar_correo(texto, verificar_dominio=True):
+    """Devuelve (correo_normalizado, None) o (None, mensaje_de_error).
+
+    Revisa, en orden: formato estricto, errores de escritura comunes (gmial.com),
+    correos desechables o de ejemplo, usuarios falsos (test@, aaaa@) y, si está instalada la
+    librería email-validator, que el dominio exista y reciba correos (consulta DNS/MX).
+    verificar_dominio=False salta solo la consulta DNS.
+    """
+    correo = texto.strip().lower()
+    if not correo:
+        return None, "Escribe tu correo."
+    if len(correo) > 254:
+        return None, "El correo es demasiado largo (máximo 254 caracteres)."
+    local, _, dominio = correo.partition("@")
+    if len(local) > 64:
+        return None, "La parte del correo antes de la @ es demasiado larga (máximo 64)."
+    if not _PATRON_CORREO.match(correo):
+        return None, "Escribe un correo válido, por ejemplo nombre@dominio.com."
+
+    if dominio in ERRORES_DOMINIO:
+        return None, (f"El dominio «{dominio}» parece un error de escritura. "
+                      f"¿Quisiste decir {ERRORES_DOMINIO[dominio]}?")
+    if dominio in DOMINIOS_DESECHABLES:
+        return None, "No se aceptan correos temporales o desechables."
+    if dominio in DOMINIOS_RESERVADOS or dominio.endswith(SUFIJOS_RESERVADOS):
+        return None, "Ese dominio no corresponde a un correo real."
+    if local in USUARIOS_FALSOS or (len(local) >= 3 and len(set(local)) == 1):
+        return None, "Escribe tu correo real, no uno de prueba."
+
+    if verificar_dominio and VERIFICAR_DOMINIO and validate_email is not None:
+        try:
+            validate_email(correo, check_deliverability=True)
+        except EmailUndeliverableError:
+            if _hay_internet():                     # sin internet no se puede comprobar: se acepta
+                return None, (f"El dominio «{dominio}» no existe o no recibe correos. "
+                              "Revisa que esté bien escrito.")
+        except EmailNotValidError:
+            return None, "Escribe un correo válido, por ejemplo nombre@dominio.com."
+    return correo, None
